@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<title>RUN PULSE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow-x:hidden;background:#f5f5f5;color:#1a1a1a;font-family:'DM Sans',sans-serif}
+#boot{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:14px;color:#E40521}
+#boot .sp{width:28px;height:28px;border:3px solid #E4052133;border-top-color:#E40521;border-radius:50%;animation:sp .7s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+#err{display:none;margin:24px;padding:16px;background:#fce8eb;border:1px solid #E4052144;border-radius:12px;color:#c00;font-size:13px;line-height:1.7}
+</style>
+</head>
+<body>
+<div id="boot"><div class="sp"></div><div style="font-size:14px">Loading RUN PULSE...</div></div>
+<div id="err"></div>
+<div id="root"></div>
+<script>window.onerror=function(m){document.getElementById('boot').style.display='none';var e=document.getElementById('err');e.style.display='block';e.innerHTML+='<div>'+m+'</div>';};</script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js"></script>
+<script crossorigin src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+<script crossorigin src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+<script type="text/babel">
+const{useState,useEffect,useCallback,useMemo}=React;
+const{LineChart,Line,BarChart,Bar,RadarChart,Radar,PolarGrid,PolarAngleAxis,PolarRadiusAxis,XAxis,YAxis,CartesianGrid,Tooltip,ResponsiveContainer,ReferenceLine,Cell,Legend}=Recharts;
+const C={red:"#E40521",rl:"#fce8eb",rg:"rgba(228,5,33,0.12)",bg:"#f5f5f5",w:"#fff",cb:"#e4e4e8",cs:"0 1px 4px rgba(0,0,0,0.06)",t:"#1a1a1a",td:"#666670",tm:"#999",sv:"#6b6b74",a2:"#1a73e8",a3:"#0d9e5f",a4:"#e8a817",a5:"#7b3fe4"};
+const SK="runpulse-hw2",SC=["#E40521","#1a73e8","#0d9e5f","#7b3fe4","#e8a817","#d63384","#0891b2","#ea580c"];
+const LS={get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},del(k){try{localStorage.removeItem(k)}catch(e){}}};
+const RPE=[{v:1,l:"1—超楽",p:.55},{v:2,l:"2—かなり楽",p:.6},{v:3,l:"3—楽",p:.65},{v:4,l:"4—やや楽",p:.7},{v:5,l:"5—普通",p:.75},{v:6,l:"6—ややきつい",p:.8},{v:7,l:"7—きつい",p:.85},{v:8,l:"8—かなりきつい",p:.9},{v:9,l:"9—非常にきつい",p:.95},{v:10,l:"10—全力",p:1}];
+const DR=[{k:"short",l:"〜5km",mn:0,mx:5.01},{k:"mid",l:"5〜10km",mn:5.01,mx:10.01},{k:"long",l:"10km〜",mn:10.01,mx:999}];
+function calcHRR(a,r,m){if(m<=r||a<r)return null;return Math.max(.3,Math.min(1,(a-r)/(m-r)))}
+function getInt(run,pf){if(run.avgHR&&pf.maxHR&&pf.restHR){var p=calcHRR(run.avgHR,pf.restHR,pf.maxHR);if(p!==null)return{p,s:"hr",d:Math.round(p*100)+"%"}}if(run.rpe){var z=RPE.find(function(x){return x.v===run.rpe});if(z)return{p:z.p,s:"rpe",d:"RPE"+z.v+"("+Math.round(z.p*100)+"%)"}}return{p:.75,s:"none",d:"未設定"}}
+function iC(p){return p>=.95?"#d32f2f":p>=.88?"#e53935":p>=.8?"#f57c00":p>=.7?"#1565c0":"#2e7d32"}
+function iL(p){return p>=.95?"全力":p>=.88?"閾値":p>=.8?"テンポ":p>=.7?"通常":"ジョグ"}
+function cVO2(v){return-4.6+.182258*v+.000104*v*v}
+function cP(t){return .8+.1894393*Math.exp(-.012778*t)+.2989558*Math.exp(-.1932605*t)}
+function rV(d,m,s){var t=m+s/60;if(t<=0||d<=0)return 0;var p=cP(t);return p<=0?0:Math.round(cVO2(d*1000/t)/p*10)/10}
+function driftK(t){if(t<=30)return 1;if(t<=60)return 1-(t-30)/30*.02;if(t<=120)return .98-(t-60)/60*.03;return Math.max(.90,.95-(t-120)/60*.03)}
+function aV(d,m,s,ip,src){var t=m+s/60;if(t<=0||d<=0)return 0;var v=d*1000/t,vo2=cVO2(v);if(src==="none")return rV(d,m,s);if(ip<=0)return 0;var eff=ip*driftK(t);return eff<=0?0:Math.round(vo2/eff*10)/10}
+function predT(vdot,dk){if(vdot<=0||dk<=0)return null;var lo=dk*1.5,hi=dk*20;for(var i=0;i<60;i++){var mid=(lo+hi)/2,v=dk*1000/mid,pc=cP(mid);if(pc<=0)return null;if(cVO2(v)/pc>vdot)lo=mid;else hi=mid}return(lo+hi)/2}
+function fRT(m){if(!m||m<=0)return"--:--";var h=Math.floor(m/60),mn=Math.floor(m%60),s=Math.round((m%1)*60);return h>0?h+":"+String(mn).padStart(2,"0")+":"+String(s).padStart(2,"0"):mn+":"+String(s).padStart(2,"0")}
+function vL(v){if(v>=70)return{l:"エリート",c:"#b8860b",i:"👑"};if(v>=60)return{l:"上級",c:C.red,i:"🔥"};if(v>=50)return{l:"中上級",c:C.a2,i:"⚡"};if(v>=40)return{l:"中級",c:C.a3,i:"💪"};if(v>=30)return{l:"初中級",c:C.a5,i:"🌱"};return{l:"初級",c:"#d32f2f",i:"🏃"}}
+function fP(ts,d){if(!d)return"-";var p=ts/d;return Math.floor(p/60)+":"+String(Math.round(p%60)).padStart(2,"0")}
+function vo2toPace(vdot,pct){var tvo2=vdot*pct;var a=.000104,b=.182258,c2=-4.6-tvo2;var disc=b*b-4*a*c2;if(disc<0)return null;var v=(-b+Math.sqrt(disc))/(2*a);if(v<=0)return null;return 1000/v}
+function fmtPace(minPerKm){if(!minPerKm||minPerKm<=0)return"--:--";var m=Math.floor(minPerKm),s=Math.round((minPerKm-m)*60);if(s>=60){m++;s=0}return m+":"+String(s).padStart(2,"0")}
+function hrAt(pct,prof){return Math.round(prof.restHR+pct*(prof.maxHR-prof.restHR))}
+var ZONES=[
+  {id:"E",name:"Easy",ja:"イージー",pLo:.59,pHi:.74,hrLo:.65,hrHi:.79,color:"#2e7d32",
+    menus:["30〜60分 イージーラン（会話できるペース）","90〜150分 ロング走（E上限ペース）","ウォームアップ/クールダウン 15〜20分"]},
+  {id:"M",name:"Marathon",ja:"マラソン",pLo:.75,pHi:.84,hrLo:.80,hrHi:.89,color:"#1565c0",
+    menus:["Mペース走 60〜90分（マラソン目標ペース）","ロング走にMペース区間を組み込む（例: 20km走の後半10kmをMペース）","Mペース 15分×3本（Eペースで5分つなぎ）"]},
+  {id:"T",name:"Threshold",ja:"閾値",pLo:.83,pHi:.88,hrLo:.88,hrHi:.92,color:"#f57c00",
+    menus:["テンポ走 20〜30分（Tペース持続）","クルーズインターバル 10分×3本（Eペースで2分つなぎ）","5分×5本（Eペースで1分つなぎ）","8分×4本（Eペースで2分つなぎ）"]},
+  {id:"I",name:"Interval",ja:"インターバル",pLo:.95,pHi:1.0,hrLo:.98,hrHi:1.0,color:"#d32f2f",
+    menus:["1000m×5本（jog 3分つなぎ）","1200m×4本（jog 3〜4分つなぎ）","800m×6本（jog 2〜3分つなぎ）","3分×5本（jog 3分つなぎ）"]},
+  {id:"R",name:"Repetition",ja:"レペティション",pLo:1.05,pHi:1.10,hrLo:null,hrHi:null,color:"#7b1fa2",
+    menus:["200m×10本（jog 200mつなぎ）","400m×6本（完全回復3〜5分つなぎ）","300m×8本（完全回復3分つなぎ）","200m×6 + 400m×4（完全回復）"]},
+];
+function td2(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
+var dPf={maxHR:190,restHR:60};
+var dSh=[{id:"s1",name:"Nike Vaporfly 3",brand:"Nike",color:SC[0]},{id:"s2",name:"Asics Magic Speed",brand:"Asics",color:SC[1]},{id:"s3",name:"Adidas Adizero",brand:"Adidas",color:SC[2]}];
+var dRn=[{id:1,date:"2026-02-05",distance:5,minutes:28,seconds:30,shoeId:"s3",avgHR:128,rpe:null,note:"朝ジョグ"},{id:2,date:"2026-02-12",distance:10,minutes:55,seconds:0,shoeId:"s2",avgHR:145,rpe:null,note:"ロング走"},{id:3,date:"2026-02-19",distance:5,minutes:25,seconds:10,shoeId:"s1",avgHR:175,rpe:null,note:"TT Vaporfly"},{id:4,date:"2026-02-26",distance:5,minutes:29,seconds:0,shoeId:"s3",avgHR:null,rpe:3,note:"リカバリー"},{id:5,date:"2026-03-05",distance:8,minutes:40,seconds:20,shoeId:"s2",avgHR:160,rpe:null,note:"テンポ走"},{id:6,date:"2026-03-10",distance:5,minutes:24,seconds:50,shoeId:"s1",avgHR:178,rpe:null,note:"5km TT"},{id:7,date:"2026-03-14",distance:10,minutes:52,seconds:30,shoeId:"s1",avgHR:168,rpe:null,note:"閾値走"},{id:8,date:"2026-03-18",distance:5,minutes:28,seconds:50,shoeId:"s2",avgHR:125,rpe:null,note:"ジョグ"},{id:9,date:"2026-03-22",distance:5,minutes:24,seconds:30,shoeId:"s1",avgHR:182,rpe:null,note:"全力！"},{id:10,date:"2026-03-26",distance:12,minutes:63,seconds:0,shoeId:"s2",avgHR:148,rpe:null,note:"ハーフ練"},{id:11,date:"2026-03-30",distance:5,minutes:27,seconds:30,shoeId:"s3",avgHR:null,rpe:5,note:"通常ラン"},{id:12,date:"2026-04-01",distance:5,minutes:24,seconds:15,shoeId:"s1",avgHR:184,rpe:null,note:"PB更新！🎉"}];
+function CDot(pr){var{cx,cy,payload}=pr;if(cx==null||cy==null||!payload)return null;return <circle cx={cx} cy={cy} r={4} fill={payload.shoeColor||"#888"} stroke={iC(payload.ip||.75)} strokeWidth={2}/>}
+function IBar({pct,grad}){return <div style={{display:"flex",alignItems:"center",gap:8,marginTop:6}}><div style={{flex:1,height:6,borderRadius:3,background:"#eee",overflow:"hidden"}}><div style={{width:pct*100+"%",height:"100%",borderRadius:3,background:grad}}/></div><span style={{fontSize:13,fontWeight:700,color:iC(pct),fontFamily:"'Space Mono',monospace"}}>{Math.round(pct*100)+"%"}</span><span style={{fontSize:10,color:C.tm}}>{iL(pct)}</span></div>}
+function CTip({active,payload}){if(!active||!payload||!payload.length)return null;var d=payload[0]&&payload[0].payload;if(!d)return null;return <div style={{background:"#fff",border:"1px solid #ddd",borderRadius:10,padding:"10px 14px",fontSize:12.5,color:C.t,boxShadow:"0 4px 20px rgba(0,0,0,.1)"}}><div style={{color:C.red,fontWeight:700,marginBottom:3}}>{d.dl}</div><div>{"VDOT: "}<b>{d.vdot}</b>{d.rv!==d.vdot?" (実測"+d.rv+")":""}</div><div>{d.distance+"km ・ "+d.pl+"/km"}</div><div>{"強度: "}<span style={{color:iC(d.ip)}}>{d.id2}</span>{" "+iL(d.ip)}</div>{d.avgHR?<div>{"♥"+d.avgHR+"bpm"}</div>:null}{d.sn?<div>{d.sn}</div>:null}{d.note?<div style={{color:"#999",marginTop:2}}>{d.note}</div>:null}</div>}
+function Chk({on,toggle,label,color}){return <button onClick={toggle} style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 10px",borderRadius:8,border:on?"1.5px solid "+color:"1.5px solid #ddd",background:on?color+"12":"#fff",color:on?color:"#999",cursor:"pointer",fontSize:12,fontWeight:600}}><span style={{width:15,height:15,borderRadius:4,display:"flex",alignItems:"center",justifyContent:"center",border:on?"2px solid "+color:"2px solid #ccc",background:on?color:"transparent",fontSize:10,color:"#fff"}}>{on?"✓":""}</span>{label}</button>}
+function PredCard({vdot}){if(!vdot||vdot<=0)return null;return <div style={{display:"flex",gap:8,marginTop:12}}>{[{n:"10K",d:10},{n:"Half",d:21.0975},{n:"Full",d:42.195}].map(function(r){return <div key={r.n} style={{flex:1,background:C.rl,borderRadius:10,padding:"10px 6px",textAlign:"center",border:"1px solid "+C.red+"22"}}><div style={{fontSize:10,fontWeight:700,color:C.red,letterSpacing:".05em",fontFamily:"'Space Mono',monospace"}}>{r.n}</div><div style={{fontSize:15,fontWeight:800,color:C.t,fontFamily:"'Space Mono',monospace",marginTop:2}}>{fRT(predT(vdot,r.d))}</div></div>})}</div>}
+
+function App(){
+  const[data,setData]=useState(null),[view,setView]=useState("ability"),[sf2,setSf2]=useState(false),[ssf,setSsf]=useState(false),[sp,setSp]=useState(false);
+  const[form,setForm]=useState({date:td2(),distance:"",minutes:"",seconds:"",shoeId:"",avgHR:"",rpe:"",note:""});
+  const[sf,setSf]=useState({name:"",brand:""}),[pf,setPf]=useState({m:"",r:""}),[eid,setEid]=useState(null),[im,setIm]=useState("hr");
+  const[fS,setFS]=useState({}),[fD,setFD]=useState({}),[fo,setFo]=useState(false);
+  const[showImp,setShowImp]=useState(false),[impPrev,setImpPrev]=useState(null),[impErr,setImpErr]=useState("");
+  const[showJSON,setShowJSON]=useState(false),[jsonPrev,setJsonPrev]=useState(null),[jsonErr,setJsonErr]=useState("");
+  useEffect(function(){var s=LS.get(SK);if(s)setData(s);else{var i={runs:dRn,shoes:dSh,profile:dPf};setData(i);LS.set(SK,i)}document.getElementById('boot').style.display='none'},[]);
+  useEffect(function(){if(!data)return;setFS(function(p){var n={};data.shoes.forEach(function(s){n[s.id]=p[s.id]!==undefined?p[s.id]:true});return n});setFD(function(p){var n={};DR.forEach(function(d){n[d.k]=p[d.k]!==undefined?p[d.k]:true});return n})},[data]);
+  var save=useCallback(function(d){setData(d);LS.set(SK,d)},[]);
+  function parseImportFile(text){
+    var lines=text.split("\n").map(function(l){return l.trim()}).filter(function(l){return l&&!l.startsWith("#")});
+    var parsed=[];var errs=[];
+    lines.forEach(function(line,idx){
+      var parts=line.split(",").map(function(s){return s.trim()});
+      if(parts.length<3){errs.push((idx+1)+"行目: 列不足");return}
+      var date=parts[0],dist=parseFloat(parts[1]);
+      var timeParts=(parts[2]||"").split(":");var mins=parseInt(timeParts[0])||0,secs=parseInt(timeParts[1])||0;
+      if(!date.match(/^\d{4}-\d{2}-\d{2}$/)){errs.push((idx+1)+"行目: 日付形式エラー(YYYY-MM-DD)");return}
+      if(isNaN(dist)||dist<=0){errs.push((idx+1)+"行目: 距離エラー");return}
+      if(mins<=0&&secs<=0){errs.push((idx+1)+"行目: タイムエラー");return}
+      var intStr=(parts[3]||"").trim().toUpperCase(),avgHR=null,rpe=null;
+      if(intStr.startsWith("HR"))avgHR=parseInt(intStr.slice(2))||null;
+      else if(intStr.startsWith("RPE"))rpe=parseInt(intStr.slice(3))||null;
+      else if(intStr&&!isNaN(parseInt(intStr)))avgHR=parseInt(intStr);
+      var shoeNum=(parts[4]||"").trim(),shoeId="";
+      if(shoeNum){var idx=parseInt(shoeNum);if(!isNaN(idx)&&idx>=1&&idx<=shoes.length)shoeId=shoes[idx-1].id;}
+      var note=(parts.slice(5)||[]).join(",").trim();
+      parsed.push({id:Date.now()+idx,date:date,distance:dist,minutes:mins,seconds:secs,avgHR:avgHR,rpe:rpe,shoeId:shoeId,note:note});
+    });
+    return{parsed:parsed,errs:errs};
+  }
+  function handleFileImport(e){
+    var file=e.target.files&&e.target.files[0];if(!file)return;
+    var reader=new FileReader();
+    reader.onload=function(ev){
+      var text=ev.target.result;
+      var result=parseImportFile(text);
+      setImpPrev(result);setImpErr(result.errs.length?result.errs.join("\n"):"");
+    };
+    reader.readAsText(file);
+  }
+  function doImport(){
+    if(!impPrev||!impPrev.parsed.length)return;
+    save({...data,runs:runs.concat(impPrev.parsed)});
+    setImpPrev(null);setShowImp(false);setImpErr("");
+  }
+  function exportJSON(){
+    var json=JSON.stringify(data,null,2);
+    var blob=new Blob([json],{type:"application/json"});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement("a");
+    a.href=url;a.download="runpulse-backup-"+td2()+".json";
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+  function handleJSONImport(e){
+    var file=e.target.files&&e.target.files[0];if(!file)return;
+    var reader=new FileReader();
+    reader.onload=function(ev){
+      try{
+        var parsed=JSON.parse(ev.target.result);
+        if(!parsed.runs||!Array.isArray(parsed.runs)){setJsonErr("JSONにrunsが含まれていません");setJsonPrev(null);return}
+        setJsonPrev(parsed);setJsonErr("");
+      }catch(err){setJsonErr("JSONの解析に失敗: "+err.message);setJsonPrev(null);}
+    };
+    reader.readAsText(file);
+    e.target.value="";
+  }
+  function doJSONImport(mode){
+    if(!jsonPrev)return;
+    if(mode==="replace"){
+      save(jsonPrev);
+    }else{
+      var existIds={};runs.forEach(function(r){existIds[r.id]=true});
+      var newRuns=jsonPrev.runs.filter(function(r){return!existIds[r.id]});
+      var existShoeIds={};shoes.forEach(function(s){existShoeIds[s.id]=true});
+      var newShoes=jsonPrev.shoes?jsonPrev.shoes.filter(function(s){return!existShoeIds[s.id]}):[];
+      save({...data,runs:runs.concat(newRuns),shoes:shoes.concat(newShoes),profile:jsonPrev.profile||prof});
+    }
+    setJsonPrev(null);setShowJSON(false);setJsonErr("");
+  }
+  var runs=data?data.runs:[],shoes=data?data.shoes:[],prof=data?data.profile||dPf:dPf;
+  var sorted=useMemo(function(){return runs.slice().sort(function(a,b){return a.date<b.date?-1:1})},[runs]);
+  var allCD=useMemo(function(){return sorted.map(function(r){var ts=r.minutes*60+r.seconds,rv2=rV(r.distance,r.minutes,r.seconds),it=getInt(r,prof),v=aV(r.distance,r.minutes,r.seconds,it.p,it.s),sh=shoes.find(function(s){return s.id===r.shoeId});return{id:r.id,date:r.date,distance:r.distance,minutes:r.minutes,seconds:r.seconds,shoeId:r.shoeId,avgHR:r.avgHR,rpe:r.rpe,note:r.note,vdot:v,rv:rv2,ts:ts,ip:it.p,is:it.s,id2:it.d,dl:r.date.slice(5).replace("-","/"),pl:fP(ts,r.distance),sn:sh?sh.name:"未設定",shoeColor:sh?sh.color:"#888"}})},[sorted,shoes,prof]);
+  var cd=useMemo(function(){return allCD.filter(function(r){var sok=!r.shoeId||fS[r.shoeId]!==false;var dr=DR.find(function(d){return r.distance>=d.mn-.01&&r.distance<d.mx});return sok&&(!dr||fD[dr.k]!==false)})},[allCD,fS,fD]);
+  var afc=useMemo(function(){return shoes.filter(function(s){return fS[s.id]===false}).length+DR.filter(function(d){return fD[d.k]===false}).length},[shoes,fS,fD]);
+  var gA=cd.length?Math.round(cd.reduce(function(s,r){return s+r.vdot},0)/cd.length*10)/10:0;
+  var cur=cd.length>=3?Math.round(cd.slice(-3).reduce(function(s,r){return s+r.vdot},0)/3*10)/10:cd.length?cd[cd.length-1].vdot:0;
+  var best=cd.length?Math.max.apply(null,cd.map(function(r){return r.vdot})):0;
+  var trend=cd.length>=6?cd.slice(-3).reduce(function(s,r){return s+r.vdot},0)/3-cd.slice(-6,-3).reduce(function(s,r){return s+r.vdot},0)/3:0;
+  var sS=useMemo(function(){return shoes.map(function(sh){var sr=allCD.filter(function(r){return r.shoeId===sh.id});var c=sr.length;return{...sh,count:c,td:sr.reduce(function(s,r){return s+r.distance},0),av:c?Math.round(sr.reduce(function(s,r){return s+r.vdot},0)/c*10)/10:0,bv:c?Math.round(Math.max.apply(null,sr.map(function(r){return r.vdot}))*10)/10:0}}).sort(function(a,b){return b.av-a.av})},[shoes,allCD]);
+  var gAll=allCD.length?Math.round(allCD.reduce(function(s,r){return s+r.vdot},0)/allCD.length*10)/10:0;
+  var sI=useMemo(function(){if(!gAll)return[];return sS.filter(function(s){return s.count>=2}).map(function(s){return{name:s.name.length>12?s.name.slice(0,12)+"…":s.name,full:s.name,imp:Math.round((s.av-gAll)*10)/10,av:s.av,count:s.count,color:s.color}})},[sS,gAll]);
+  var rD=useMemo(function(){var a=sS.filter(function(s){return s.count>0}).slice(0,3);if(a.length<2)return[];var ms=["平均VDOT","最高VDOT","走行回数","総距離"];var mx={"平均VDOT":Math.max.apply(null,a.map(function(s){return s.av}).concat([1])),"最高VDOT":Math.max.apply(null,a.map(function(s){return s.bv}).concat([1])),"走行回数":Math.max.apply(null,a.map(function(s){return s.count}).concat([1])),"総距離":Math.max.apply(null,a.map(function(s){return s.td}).concat([1]))};return ms.map(function(m){var e={metric:m};a.forEach(function(s){var raw=m==="平均VDOT"?s.av:m==="最高VDOT"?s.bv:m==="走行回数"?s.count:s.td;e[s.name]=Math.round(raw/mx[m]*100)});return e})},[sS]);
+  var hrP=im==="hr"&&form.avgHR?calcHRR(parseInt(form.avgHR),prof.restHR,prof.maxHR):null;
+  var rpeP=im==="rpe"&&form.rpe?RPE.find(function(z){return z.v===parseInt(form.rpe)}):null;
+  var fp=null,fpD=parseFloat(form.distance)||0,fpM=parseInt(form.minutes)||0,fpS=parseInt(form.seconds)||0;
+  if(fpD>0&&fpM>0){var fi=getInt({avgHR:im==="hr"&&form.avgHR?parseInt(form.avgHR):null,rpe:im==="rpe"&&form.rpe?parseInt(form.rpe):null},prof);fp={raw:rV(fpD,fpM,fpS),adj:aV(fpD,fpM,fpS,fi.p,fi.s),ip:fi.p,id:fi.d,src:fi.s}}
+  function hEdit(r){setForm({date:r.date,distance:String(r.distance),minutes:String(r.minutes),seconds:String(r.seconds||0),shoeId:r.shoeId||"",avgHR:r.avgHR?String(r.avgHR):"",rpe:r.rpe?String(r.rpe):"",note:r.note||""});setIm(r.avgHR?"hr":"rpe");setEid(r.id);setSf2(true);setView("ability")}
+  function hSub(){var d=parseFloat(form.distance),m=parseInt(form.minutes),s=parseInt(form.seconds)||0;if(!form.date||isNaN(d)||isNaN(m)||d<=0||m<0)return;var run={id:eid||Date.now(),date:form.date,distance:d,minutes:m,seconds:s,shoeId:form.shoeId||(shoes[0]?shoes[0].id:""),avgHR:im==="hr"&&form.avgHR?parseInt(form.avgHR):null,rpe:im==="rpe"&&form.rpe?parseInt(form.rpe):null,note:form.note};if(eid){save({...data,runs:runs.map(function(r){return r.id===eid?run:r})});setEid(null)}else save({...data,runs:runs.concat([run])});setForm({date:td2(),distance:"",minutes:"",seconds:"",shoeId:"",avgHR:"",rpe:"",note:""});setSf2(false)}
+  function sPf(){var mx=parseInt(pf.m),rs=parseInt(pf.r);if(!isNaN(mx)&&!isNaN(rs)&&mx>rs){save({...data,profile:{maxHR:mx,restHR:rs}});setSp(false)}}
+  function aSh(){if(!sf.name)return;save({...data,shoes:shoes.concat([{id:"s"+Date.now(),name:sf.name,brand:sf.brand,color:SC[shoes.length%SC.length]}])});setSf({name:"",brand:""});setSsf(false)}
+  if(!data)return null;
+  var inp={background:"#fff",border:"1.5px solid #ddd",borderRadius:8,padding:"12px",color:C.t,fontSize:16,outline:"none",width:"100%",boxSizing:"border-box"};
+  var lv=vL(cur),tS=trend>0?"↑":trend<0?"↓":"→",tC=trend>0?C.a3:trend<0?C.red:C.tm;
+
+  return <div style={{minHeight:"100vh",background:C.bg,paddingBottom:60}}>
+    {/* HEADER */}
+    <div style={{background:"#fff",borderBottom:"3px solid "+C.red,padding:"env(safe-area-inset-top,12px) 16px 14px",boxShadow:"0 2px 8px rgba(0,0,0,.04)"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:8}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:38,height:38,borderRadius:8,background:C.red,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"#fff",fontWeight:800,fontFamily:"'Space Mono',monospace"}}>{"R"}</div>
+          <div><h1 style={{fontSize:20,fontWeight:800,letterSpacing:".06em",color:C.t}}>{"RUN PULSE"}</h1><p style={{fontSize:9,color:C.tm,letterSpacing:".12em",fontFamily:"'Space Mono',monospace"}}>{"ABILITY TRACKER"}</p></div>
+        </div>
+        <button onClick={function(){setSp(!sp);setPf({m:String(prof.maxHR),r:String(prof.restHR)})}} style={{padding:"8px 12px",border:"1.5px solid #ddd",borderRadius:8,background:sp?C.rl:"#fff",color:sp?C.red:C.td,cursor:"pointer",fontSize:12,fontWeight:600}}>{"♥ HR設定"}</button>
+      </div>
+      {sp&&<div style={{background:C.bg,border:"1.5px solid #ddd",borderRadius:12,padding:14,marginTop:12}}>
+        <div style={{fontSize:13,fontWeight:700,marginBottom:8}}>{"♥ 心拍数プロフィール"}</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+          <div><label style={{fontSize:10,color:C.td,display:"block",marginBottom:3}}>{"最大心拍数"}</label><input type="number" inputMode="numeric" value={pf.m} onChange={function(e){setPf({...pf,m:e.target.value})}} style={inp}/><div style={{fontSize:9,color:C.tm,marginTop:3}}>{"220−年齢"}</div></div>
+          <div><label style={{fontSize:10,color:C.td,display:"block",marginBottom:3}}>{"安静時心拍数"}</label><input type="number" inputMode="numeric" value={pf.r} onChange={function(e){setPf({...pf,r:e.target.value})}} style={inp}/><div style={{fontSize:9,color:C.tm,marginTop:3}}>{"起床直後"}</div></div>
+        </div>
+        <button onClick={sPf} style={{width:"100%",padding:"12px",border:"none",borderRadius:8,cursor:"pointer",fontSize:14,fontWeight:700,background:C.red,color:"#fff"}}>{"保存"}</button>
+      </div>}
+      <div style={{display:"flex",gap:4,marginTop:14}}>
+        {["ability","training","shoes","history"].map(function(k){var lb={ability:"能力推移",training:"トレーニング",shoes:"シューズ",history:"履歴"};return <button key={k} onClick={function(){setView(k)}} style={{flex:1,padding:"9px 0",border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700,background:view===k?C.red:"#f0f0f0",color:view===k?"#fff":C.tm}}>{lb[k]}</button>})}
+      </div>
+    </div>
+    <div style={{padding:"14px 14px 0"}}>
+      <button onClick={function(){setSf2(!sf2);setEid(null);setForm({date:td2(),distance:"",minutes:"",seconds:"",shoeId:shoes[0]?shoes[0].id:"",avgHR:"",rpe:"",note:""});setIm("hr")}} style={{width:"100%",padding:"13px",border:sf2?"1.5px solid "+C.red:"1.5px dashed #ccc",borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:700,background:sf2?C.rl:"#fff",color:C.red,marginBottom:14,boxShadow:C.cs}}>{sf2?"✕ 閉じる":"＋ ランニングを記録"}</button>
+      {/* FORM */}
+      {sf2&&<div style={{background:"#fff",border:"1.5px solid #e0e0e0",borderRadius:14,padding:16,marginBottom:16,boxShadow:C.cs}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+          <div><label style={{fontSize:10,color:C.td,display:"block",marginBottom:3}}>{"日付"}</label><input type="date" value={form.date} onChange={function(e){setForm({...form,date:e.target.value})}} style={inp}/></div>
+          <div><label style={{fontSize:10,color:C.td,display:"block",marginBottom:3}}>{"距離(km)"}</label><input type="number" inputMode="decimal" step="0.1" placeholder="5.0" value={form.distance} onChange={function(e){setForm({...form,distance:e.target.value})}} style={inp}/></div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+          <div><label style={{fontSize:10,color:C.td,display:"block",marginBottom:3}}>{"分"}</label><input type="number" inputMode="numeric" placeholder="27" value={form.minutes} onChange={function(e){setForm({...form,minutes:e.target.value})}} style={inp}/></div>
+          <div><label style={{fontSize:10,color:C.td,display:"block",marginBottom:3}}>{"秒"}</label><input type="number" inputMode="numeric" placeholder="30" value={form.seconds} onChange={function(e){setForm({...form,seconds:e.target.value})}} style={inp}/></div>
+        </div>
+        <div style={{marginBottom:10}}>
+          <label style={{fontSize:10,color:C.td,display:"block",marginBottom:6}}>{"走行強度"}</label>
+          <div style={{display:"flex",marginBottom:8}}>
+            <button onClick={function(){setIm("hr")}} style={{flex:1,padding:"10px",border:"1.5px solid "+(im==="hr"?C.red:"#ddd"),borderRadius:"8px 0 0 8px",cursor:"pointer",fontSize:13,fontWeight:700,background:im==="hr"?C.rl:"#fff",color:im==="hr"?C.red:C.tm}}>{"♥ 心拍数"}</button>
+            <button onClick={function(){setIm("rpe")}} style={{flex:1,padding:"10px",border:"1.5px solid "+(im==="rpe"?C.a2:"#ddd"),borderLeft:"none",borderRadius:"0 8px 8px 0",cursor:"pointer",fontSize:13,fontWeight:700,background:im==="rpe"?C.a2+"12":"#fff",color:im==="rpe"?C.a2:C.tm}}>{"📊 RPE"}</button>
+          </div>
+          {im==="hr"?<div><div style={{display:"flex",alignItems:"center",gap:8}}><input type="number" inputMode="numeric" placeholder="平均心拍数(例:155)" value={form.avgHR} onChange={function(e){setForm({...form,avgHR:e.target.value})}} style={{...inp,flex:1}}/><span style={{fontSize:13,color:C.td}}>{"bpm"}</span></div>{hrP!==null&&<IBar pct={hrP} grad={"linear-gradient(90deg,#2e7d32,#f57c00,"+C.red+")"}/>}{form.avgHR&&hrP===null&&<div style={{fontSize:11,color:C.red,marginTop:4}}>{"範囲外"}</div>}</div>:<div><select value={form.rpe} onChange={function(e){setForm({...form,rpe:e.target.value})}} style={{...inp,WebkitAppearance:"menulist",appearance:"menulist"}}><option value="">{"RPEを選択..."}</option>{RPE.map(function(z){return <option key={z.v} value={z.v}>{z.l+" ("+Math.round(z.p*100)+"%)"}</option>})}</select>{rpeP&&<IBar pct={rpeP.p} grad="linear-gradient(90deg,#2e7d32,#f57c00,#1565c0)"/>}</div>}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+          <div><label style={{fontSize:10,color:C.td,display:"block",marginBottom:3}}>{"シューズ"}</label><select value={form.shoeId} onChange={function(e){setForm({...form,shoeId:e.target.value})}} style={{...inp,WebkitAppearance:"menulist",appearance:"menulist"}}><option value="">{"選択なし"}</option>{shoes.map(function(s,i){return <option key={s.id} value={s.id}>{(i+1)+" "+s.name}</option>})}</select></div>
+          <div><label style={{fontSize:10,color:C.td,display:"block",marginBottom:3}}>{"メモ"}</label><input placeholder="調子など" value={form.note} onChange={function(e){setForm({...form,note:e.target.value})}} style={inp}/></div>
+        </div>
+        {fp&&<div style={{background:C.rl,borderRadius:10,padding:"12px 14px",marginBottom:14,display:"flex",justifyContent:"center",alignItems:"center",gap:14,border:"1px solid "+C.red+"22"}}>
+          <div style={{textAlign:"center"}}><div style={{fontSize:10,color:C.td}}>{fp.src==="none"?"ダニエルズ式":"実測"}</div><div style={{fontSize:16,fontWeight:700,color:C.sv,fontFamily:"'Space Mono',monospace"}}>{fp.raw}</div></div>
+          <div style={{fontSize:16,color:"#ccc"}}>{"→"}</div>
+          <div style={{textAlign:"center"}}><div style={{fontSize:10,color:fp.src==="none"?C.a2:iC(fp.ip)}}>{fp.src==="none"?"レース扱い":fp.id+" 補正"}</div><div style={{fontSize:24,fontWeight:800,color:C.red,fontFamily:"'Space Mono',monospace"}}>{fp.adj}</div></div>
+        </div>}
+        <button onClick={hSub} style={{width:"100%",padding:"13px",border:"none",borderRadius:10,cursor:"pointer",fontSize:15,fontWeight:700,background:C.red,color:"#fff",boxShadow:"0 4px 12px "+C.rg}}>{eid?"更新する":"記録する"}</button>
+      </div>}
+
+      {/* ABILITY */}
+      {view==="ability"&&<div>
+        <div style={{background:"#fff",border:"1.5px solid #e0e0e0",borderRadius:16,padding:"20px 18px",marginBottom:14,textAlign:"center",position:"relative",overflow:"hidden",boxShadow:C.cs}}>
+          <div style={{position:"absolute",top:-20,right:-20,fontSize:80,opacity:.04}}>{lv.i}</div>
+          <div style={{fontSize:11,color:C.td,fontFamily:"'Space Mono',monospace",marginBottom:6}}>{"推定走力 (直近3回平均)"}{afc>0?<span style={{color:C.red}}>{" — フィルタ中"}</span>:null}</div>
+          <div style={{fontSize:52,fontWeight:800,color:lv.c,fontFamily:"'Space Mono',monospace",lineHeight:1}}>{cur}</div>
+          <div style={{fontSize:14,fontWeight:600,color:lv.c,marginTop:6}}>{lv.i+" "+lv.l}</div>
+          <PredCard vdot={cur}/>
+          <div style={{display:"flex",justifyContent:"center",gap:24,marginTop:14,paddingTop:14,borderTop:"1px solid #eee"}}>
+            <div><div style={{fontSize:10,color:C.tm}}>{"最高"}</div><div style={{fontSize:16,fontWeight:700,color:"#b8860b",fontFamily:"'Space Mono',monospace"}}>{best}</div></div>
+            <div><div style={{fontSize:10,color:C.tm}}>{"トレンド"}</div><div style={{fontSize:16,fontWeight:700,color:tC,fontFamily:"'Space Mono',monospace"}}>{tS+Math.abs(Math.round(trend*10)/10)}</div></div>
+            <div><div style={{fontSize:10,color:C.tm}}>{"対象"}</div><div style={{fontSize:16,fontWeight:700,fontFamily:"'Space Mono',monospace"}}>{cd.length+"件"}</div></div>
+          </div>
+        </div>
+        <button onClick={function(){setFo(!fo)}} style={{width:"100%",padding:"11px 14px",border:"1.5px solid #ddd",borderRadius:fo?"10px 10px 0 0":"10px",cursor:"pointer",fontSize:13,fontWeight:600,marginBottom:fo?0:14,background:fo?C.a5+"0c":"#fff",color:fo?C.a5:C.td,display:"flex",alignItems:"center",justifyContent:"space-between"}}><span>{"🔍 フィルタ"}{afc>0?<span style={{background:C.red,color:"#fff",borderRadius:10,padding:"1px 7px",fontSize:10,marginLeft:6}}>{afc}</span>:null}</span><span style={{fontSize:16}}>{fo?"−":"+"}</span></button>
+        {fo&&<div style={{background:"#fff",border:"1.5px solid #ddd",borderTop:"none",borderRadius:"0 0 10px 10px",padding:14,marginBottom:14}}>
+          <div style={{marginBottom:12}}><div style={{fontSize:11,color:C.td,marginBottom:6}}>{"👟 シューズ"}</div><div style={{display:"flex",flexWrap:"wrap",gap:6}}>{shoes.map(function(s){return <Chk key={s.id} on={fS[s.id]!==false} toggle={function(){setFS(function(p){return{...p,[s.id]:!p[s.id]}})}} label={s.name} color={s.color}/>})}</div></div>
+          <div><div style={{fontSize:11,color:C.td,marginBottom:6}}>{"📏 距離"}</div><div style={{display:"flex",flexWrap:"wrap",gap:6}}>{DR.map(function(d){return <Chk key={d.k} on={fD[d.k]!==false} toggle={function(){setFD(function(p){return{...p,[d.k]:!p[d.k]}})}} label={d.l} color={C.a2}/>})}</div></div>
+        </div>}
+        <div style={{background:"#fff",border:"1.5px solid #e0e0e0",borderRadius:14,padding:"16px 4px 8px",marginBottom:14,boxShadow:C.cs}}>
+          <div style={{fontSize:12,fontWeight:700,marginBottom:10,paddingLeft:10}}>{"📈 VDOT 能力推移"}</div>
+          {cd.length===0?<div style={{textAlign:"center",padding:"40px 0",color:C.tm}}>{"データなし"}</div>
+          :<ResponsiveContainer width="100%" height={220}>
+            <LineChart data={cd}><defs><linearGradient id="vG" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor={C.red}/><stop offset="100%" stopColor={C.a5}/></linearGradient></defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#eee"/>
+              <XAxis dataKey="dl" tick={{fontSize:10,fill:C.tm}} axisLine={false} tickLine={false}/>
+              <YAxis domain={["dataMin-2","dataMax+2"]} tick={{fontSize:10,fill:C.tm}} axisLine={false} tickLine={false}/>
+              <Tooltip content={CTip}/>
+              <ReferenceLine y={gA} stroke={C.red+"66"} strokeDasharray="6 4" label={{value:"平均"+gA,position:"right",fill:C.red,fontSize:10}}/>
+              <Line type="monotone" dataKey="vdot" stroke="url(#vG)" strokeWidth={3} dot={CDot} activeDot={{r:7,fill:C.red,stroke:"#fff",strokeWidth:2}}/>
+            </LineChart>
+          </ResponsiveContainer>}
+        </div>
+      </div>}
+
+      {/* TRAINING */}
+      {view==="training"&&<div>
+        <div style={{background:"#fff",border:"1.5px solid #e0e0e0",borderRadius:14,padding:"16px 16px 8px",marginBottom:14,boxShadow:C.cs,textAlign:"center"}}>
+          <div style={{fontSize:11,color:C.tm,fontFamily:"'Space Mono',monospace"}}>{"現在のVDOT"}</div>
+          <div style={{fontSize:36,fontWeight:800,color:C.red,fontFamily:"'Space Mono',monospace",lineHeight:1.2}}>{cur||"—"}</div>
+          <div style={{fontSize:10,color:C.td,marginTop:4}}>{"以下のペース・心拍数はこのVDOTから算出"}</div>
+        </div>
+
+        {cur>0&&ZONES.map(function(z){
+          var pLo=vo2toPace(cur,z.pHi),pHi=vo2toPace(cur,z.pLo);
+          var hrLoVal=z.hrLo!==null?hrAt(z.hrLo,prof):null;
+          var hrHiVal=z.hrHi!==null?hrAt(z.hrHi,prof):null;
+          return <div key={z.id} style={{background:"#fff",border:"1.5px solid #e0e0e0",borderLeft:"4px solid "+z.color,borderRadius:14,padding:16,marginBottom:12,boxShadow:C.cs}}>
+            {/* Zone Header */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+              <div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",padding:"3px 10px",borderRadius:6,background:z.color,color:"#fff",fontSize:13,fontWeight:800,fontFamily:"'Space Mono',monospace",letterSpacing:".05em"}}>{z.id}</span>
+                  <span style={{fontSize:14,fontWeight:700,color:C.t}}>{z.ja}</span>
+                </div>
+                <div style={{fontSize:10,color:C.tm,marginTop:2,marginLeft:2}}>{z.name+" — "+Math.round(z.pLo*100)+"〜"+Math.round(z.pHi*100)+"% VO2max"}</div>
+              </div>
+            </div>
+
+            {/* Pace & HR Cards */}
+            <div style={{display:"flex",gap:8,marginBottom:12}}>
+              <div style={{flex:1,background:"#f8f8f8",borderRadius:10,padding:"10px 12px",textAlign:"center"}}>
+                <div style={{fontSize:9,color:C.tm,fontWeight:600,marginBottom:4}}>{"ペース /km"}</div>
+                <div style={{fontSize:18,fontWeight:800,color:z.color,fontFamily:"'Space Mono',monospace"}}>{fmtPace(pLo)}</div>
+                <div style={{fontSize:11,color:C.td}}>{"〜"}</div>
+                <div style={{fontSize:18,fontWeight:800,color:z.color,fontFamily:"'Space Mono',monospace"}}>{fmtPace(pHi)}</div>
+              </div>
+              <div style={{flex:1,background:"#f8f8f8",borderRadius:10,padding:"10px 12px",textAlign:"center"}}>
+                <div style={{fontSize:9,color:C.tm,fontWeight:600,marginBottom:4}}>{"心拍数 bpm"}</div>
+                {hrLoVal?<div>
+                  <div style={{fontSize:18,fontWeight:800,color:z.color,fontFamily:"'Space Mono',monospace"}}>{hrLoVal}</div>
+                  <div style={{fontSize:11,color:C.td}}>{"〜"}</div>
+                  <div style={{fontSize:18,fontWeight:800,color:z.color,fontFamily:"'Space Mono',monospace"}}>{hrHiVal}</div>
+                </div>:<div style={{fontSize:13,color:C.tm,marginTop:8}}>{"全力走\n（HR管理不要）"}</div>}
+              </div>
+            </div>
+
+            {/* Workout Menus */}
+            <div style={{background:"#fafafa",borderRadius:10,padding:"10px 12px"}}>
+              <div style={{fontSize:10,fontWeight:700,color:z.color,marginBottom:6}}>{"📋 メニュー例"}</div>
+              {z.menus.map(function(menu,mi){
+                return <div key={mi} style={{fontSize:12,color:C.td,padding:"5px 0",borderBottom:mi<z.menus.length-1?"1px solid #eee":"none",display:"flex",alignItems:"flex-start",gap:6}}>
+                  <span style={{color:z.color,fontWeight:700,flexShrink:0,fontSize:10,marginTop:2}}>{"▸"}</span>
+                  <span>{menu}</span>
+                </div>
+              })}
+            </div>
+          </div>
+        })}
+
+        {cur<=0&&<div style={{textAlign:"center",padding:"40px 0",color:C.tm}}>{"ランニングを記録するとトレーニングペースが表示されます"}</div>}
+
+        {/* Reference */}
+        <div style={{background:"#fff",border:"1.5px solid #e0e0e0",borderRadius:14,padding:14,boxShadow:C.cs}}>
+          <div style={{fontSize:12,fontWeight:700,marginBottom:8}}>{"📖 ゾーンの使い分け"}</div>
+          <div style={{fontSize:11,color:C.td,lineHeight:1.7}}>
+            {"週間走行距離の約80%をEペースで走り、残り20%をT・I・Rに充てるのが基本。"}<br/>
+            {"E: 有酸素ベース構築。毎日のジョグやロング走に。"}<br/>
+            {"M: マラソン特異的な持久力。レース4〜8週前から導入。"}<br/>
+            {"T: 乳酸性閾値の向上。週1〜2回、合計30分以内。"}<br/>
+            {"I: VO2max向上。週1回、合計8km以内。3〜5分の反復。"}<br/>
+            {"R: ランニングエコノミー改善。200〜400mの短い反復。"}
+          </div>
+        </div>
+      </div>}
+
+      {/* SHOES */}
+      {view==="shoes"&&<div>
+        {sI.length>0&&<div style={{background:"#fff",border:"1.5px solid #e0e0e0",borderRadius:14,padding:"16px 4px 8px",marginBottom:14,boxShadow:C.cs}}>
+          <div style={{fontSize:12,fontWeight:700,marginBottom:4,paddingLeft:10}}>{"👟 シューズ影響度"}</div>
+          <div style={{fontSize:10,color:C.tm,marginBottom:10,paddingLeft:10}}>{"平均VDOT("+gAll+")との差"}</div>
+          <ResponsiveContainer width="100%" height={Math.max(120,sI.length*52)}>
+            <BarChart data={sI} layout="vertical" margin={{left:10,right:20}}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#eee" horizontal={false}/>
+              <XAxis type="number" tick={{fontSize:10,fill:C.tm}} axisLine={false} tickLine={false}/>
+              <YAxis type="category" dataKey="name" tick={{fontSize:11,fill:C.sv}} axisLine={false} tickLine={false} width={100}/>
+              <Tooltip content={function(p2){if(!p2.active||!p2.payload||!p2.payload.length)return null;var d=p2.payload[0].payload;return <div style={{background:"#fff",border:"1px solid #ddd",borderRadius:10,padding:"10px 14px",fontSize:13}}><div style={{fontWeight:700,color:d.color}}>{d.full}</div><div>{"平均:"+d.av+" 影響:"+(d.imp>0?"+":"")+d.imp}</div><div>{d.count+"回"}</div></div>}}/>
+              <Bar dataKey="imp" radius={[0,6,6,0]} maxBarSize={28}>{sI.map(function(e,i){return <Cell key={i} fill={e.color} fillOpacity={.85}/>})}</Bar>
+              <ReferenceLine x={0} stroke="#ccc"/>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>}
+        {rD.length>0&&<div style={{background:"#fff",border:"1.5px solid #e0e0e0",borderRadius:14,padding:"16px 4px 8px",marginBottom:14,boxShadow:C.cs}}>
+          <div style={{fontSize:12,fontWeight:700,marginBottom:8,paddingLeft:10}}>{"🎯 総合比較"}</div>
+          <ResponsiveContainer width="100%" height={260}>
+            <RadarChart data={rD} cx="50%" cy="50%" outerRadius="70%"><PolarGrid stroke="#ddd"/><PolarAngleAxis dataKey="metric" tick={{fontSize:11,fill:C.sv}}/><PolarRadiusAxis tick={false} axisLine={false}/>
+              {sS.filter(function(s){return s.count>0}).slice(0,3).map(function(s){return <Radar key={s.id} name={s.name} dataKey={s.name} stroke={s.color} fill={s.color} fillOpacity={.12} strokeWidth={2}/>})}
+              <Legend wrapperStyle={{fontSize:11,color:C.sv}}/></RadarChart>
+          </ResponsiveContainer>
+        </div>}
+        <div style={{fontSize:12,fontWeight:700,marginBottom:10}}>{"👟 登録シューズ"}</div>
+        {sS.map(function(s){var si=shoes.findIndex(function(x){return x.id===s.id});return <div key={s.id} style={{background:"#fff",border:"1.5px solid #e0e0e0",borderLeft:"4px solid "+s.color,borderRadius:12,padding:14,marginBottom:8,boxShadow:C.cs}}>
+          <div style={{display:"flex",justifyContent:"space-between"}}><div><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:24,height:24,borderRadius:6,background:s.color,color:"#fff",fontSize:12,fontWeight:800,fontFamily:"'Space Mono',monospace"}}>{si>=0?si+1:"?"}</span><span style={{fontSize:14,fontWeight:700,color:s.color}}>{s.name}</span></div>{s.brand?<div style={{fontSize:11,color:C.tm,marginLeft:32}}>{s.brand}</div>:null}<div style={{fontSize:11,color:C.td,marginTop:4,marginLeft:32}}>{s.count+"回 ・ "+s.td.toFixed(1)+"km ・ 平均"+s.av+" ・ 最高"+s.bv}</div></div><button onClick={function(){save({...data,shoes:shoes.filter(function(x){return x.id!==s.id}),runs:runs.map(function(r){return r.shoeId===s.id?{...r,shoeId:""}:r})})}} style={{background:"none",border:"none",color:"#ccc",cursor:"pointer",fontSize:18,padding:4}}>{"×"}</button></div>
+        </div>})}
+        <button onClick={function(){setSsf(!ssf)}} style={{width:"100%",padding:"12px",border:"1.5px dashed #ccc",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:700,background:ssf?C.a5+"0c":"#fff",color:C.a5,marginTop:8}}>{ssf?"✕ 閉じる":"＋ シューズ追加"}</button>
+        {ssf&&<div style={{background:"#fff",border:"1.5px solid #e0e0e0",borderRadius:14,padding:16,marginTop:10,boxShadow:C.cs}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+            <div><label style={{fontSize:10,color:C.td,display:"block",marginBottom:3}}>{"名前"}</label><input placeholder="Vaporfly 3" value={sf.name} onChange={function(e){setSf({...sf,name:e.target.value})}} style={inp}/></div>
+            <div><label style={{fontSize:10,color:C.td,display:"block",marginBottom:3}}>{"ブランド"}</label><input placeholder="Nike" value={sf.brand} onChange={function(e){setSf({...sf,brand:e.target.value})}} style={inp}/></div>
+          </div>
+          <button onClick={aSh} style={{width:"100%",padding:"12px",border:"none",borderRadius:10,cursor:"pointer",fontSize:14,fontWeight:700,background:"linear-gradient(135deg,"+C.a5+","+C.a2+")",color:"#fff"}}>{"追加"}</button>
+        </div>}
+      </div>}
+
+      {/* HISTORY */}
+      {view==="history"&&<div>
+        <div style={{fontSize:12,fontWeight:700,marginBottom:10}}>{"全"+runs.length+"件"}</div>
+        {sorted.slice().reverse().map(function(r){
+          var ts=r.minutes*60+r.seconds,it=getInt(r,prof),a2=aV(r.distance,r.minutes,r.seconds,it.p,it.s),r2=rV(r.distance,r.minutes,r.seconds),lv2=vL(a2),sh=shoes.find(function(s){return s.id===r.shoeId}),ic=iC(it.p);
+          var tag=it.s==="hr"?"♥"+r.avgHR+" "+Math.round(it.p*100)+"%":it.s==="rpe"?"RPE"+r.rpe+" "+Math.round(it.p*100)+"%":"レース扱い";
+          return <div key={r.id} style={{background:"#fff",border:"1.5px solid #e0e0e0",borderRadius:12,padding:14,marginBottom:8,boxShadow:C.cs}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+              <div style={{flex:1}}><div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}><span style={{fontSize:13,fontWeight:700}}>{r.date}</span><span style={{fontSize:9,color:ic,background:ic+"15",padding:"2px 6px",borderRadius:4,fontWeight:600}}>{tag}</span>{sh?<span style={{fontSize:9,color:sh.color,background:sh.color+"12",padding:"2px 6px",borderRadius:4}}>{sh.name}</span>:null}</div>
+              <div style={{fontSize:11,color:C.td,marginTop:3}}>{r.distance+"km ・ "+r.minutes+":"+(r.seconds||0).toString().padStart(2,"0")+" ・ "+fP(ts,r.distance)+"/km"}</div>
+              {r.note?<div style={{fontSize:11,color:C.tm,marginTop:3}}>{"💬 "+r.note}</div>:null}</div>
+              <div style={{textAlign:"right",flexShrink:0}}><div style={{fontSize:24,fontWeight:800,color:lv2.c,fontFamily:"'Space Mono',monospace",lineHeight:1}}>{a2}</div><div style={{fontSize:9,color:C.tm}}>{it.s==="none"?"ダニエルズ式":r2!==a2?"補正(実測"+r2+")":"VDOT"}</div></div>
+            </div>
+            <div style={{display:"flex",gap:6,marginTop:10}}>
+              <button onClick={function(){hEdit(r)}} style={{flex:1,padding:"8px",border:"1.5px solid #ddd",borderRadius:7,background:"#fff",color:C.sv,fontSize:12,cursor:"pointer"}}>{"編集"}</button>
+              <button onClick={function(){save({...data,runs:runs.filter(function(x){return x.id!==r.id})})}} style={{flex:1,padding:"8px",border:"1.5px solid "+C.red+"33",borderRadius:7,background:C.rl,color:C.red,fontSize:12,cursor:"pointer"}}>{"削除"}</button>
+            </div>
+          </div>
+        })}
+        {/* Import Section */}
+        <button onClick={function(){setShowImp(!showImp);setImpPrev(null);setImpErr("")}} style={{width:"100%",padding:"12px",border:"2px dashed "+C.a2+"44",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:700,background:showImp?C.a2+"10":"#fff",color:C.a2,marginTop:10}}>
+          {showImp?"✕ 閉じる":"📥 .txtから一括インポート"}
+        </button>
+        {showImp&&<div style={{background:"#fff",border:"1.5px solid #e0e0e0",borderRadius:12,padding:16,marginTop:8,boxShadow:C.cs}}>
+          <div style={{fontSize:12,fontWeight:700,marginBottom:8}}>{"📄 フォーマット (.txt)"}</div>
+          <div style={{background:"#f7f7f7",borderRadius:8,padding:12,fontSize:11,fontFamily:"'Space Mono',monospace",color:C.td,lineHeight:1.8,marginBottom:10,overflowX:"auto",whiteSpace:"pre"}}>{"# 日付, 距離km, タイム分:秒, 強度, シューズNo, メモ\n2026-01-15, 5.0, 25:30, HR155, 1, テンポ走\n2026-01-20, 10.0, 52:00, RPE7, 2, ロング\n2026-02-01, 5.0, 28:00, , , リカバリー"}</div>
+          <div style={{background:"#f0f4ff",borderRadius:8,padding:10,marginBottom:10,border:"1px solid #d0daf0"}}>
+            <div style={{fontSize:10,fontWeight:700,color:C.a2,marginBottom:4}}>{"👟 シューズ番号"}</div>
+            {shoes.map(function(s,i){return <div key={s.id} style={{fontSize:11,display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+              <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:20,height:20,borderRadius:5,background:s.color,color:"#fff",fontSize:10,fontWeight:800,fontFamily:"'Space Mono',monospace"}}>{i+1}</span>
+              <span style={{color:C.t}}>{s.name}</span>
+            </div>})}
+            {shoes.length===0&&<div style={{fontSize:11,color:C.tm}}>{"シューズ未登録（先にシューズ分析タブで追加）"}</div>}
+          </div>
+          <div style={{fontSize:10,color:C.tm,marginBottom:12,lineHeight:1.6}}>
+            {"• 1行1ラン、カンマ区切り"}<br/>
+            {"• 強度: HR155(心拍数) / RPE7(主観) / 空欄OK"}<br/>
+            {"• シューズ: 上の番号(1,2,3...) / 空欄OK"}<br/>
+            {"• #で始まる行はコメント（無視）"}
+          </div>
+          <label style={{display:"block",width:"100%",padding:"12px",border:"2px dashed #ddd",borderRadius:10,cursor:"pointer",textAlign:"center",fontSize:13,fontWeight:600,color:C.a2,background:"#fafafa",marginBottom:8}}>
+            {"📂 .txtファイルを選択"}
+            <input type="file" accept=".txt" onChange={handleFileImport} style={{display:"none"}}/>
+          </label>
+          {impErr&&<div style={{background:"#fff5f5",border:"1px solid #f5cccc",borderRadius:8,padding:10,fontSize:11,color:"#c00",marginBottom:8,whiteSpace:"pre-wrap"}}>{impErr}</div>}
+          {impPrev&&impPrev.parsed.length>0&&<div>
+            <div style={{fontSize:12,fontWeight:700,color:C.a3,marginBottom:6}}>{impPrev.parsed.length+"件のデータを検出"}</div>
+            <div style={{maxHeight:200,overflowY:"auto",marginBottom:10}}>
+              {impPrev.parsed.map(function(r,i){
+                var gi=getInt(r,prof),v=aV(r.distance,r.minutes,r.seconds,gi.p,gi.s);
+                var sh=shoes.find(function(s){return s.id===r.shoeId});
+                return <div key={i} style={{fontSize:11,padding:"6px 8px",background:i%2===0?"#f9f9f9":"#fff",borderRadius:6,marginBottom:2,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span>{r.date+" "+r.distance+"km "+r.minutes+":"+String(r.seconds).padStart(2,"0")}{r.avgHR?" HR"+r.avgHR:r.rpe?" RPE"+r.rpe:""}{sh?" 👟"+sh.name:""}{r.note?" "+r.note:""}</span>
+                  <span style={{fontWeight:700,color:C.red,fontFamily:"'Space Mono',monospace",flexShrink:0}}>{v}</span>
+                </div>
+              })}
+            </div>
+            <button onClick={doImport} style={{width:"100%",padding:"12px",border:"none",borderRadius:10,cursor:"pointer",fontSize:14,fontWeight:700,background:C.red,color:"#fff"}}>{"✓ "+impPrev.parsed.length+"件をインポート"}</button>
+          </div>}
+        </div>}
+        {/* JSON Sync Section */}
+        <div style={{marginTop:14,padding:"14px",background:"#fff",border:"1.5px solid #e0e0e0",borderRadius:12,boxShadow:C.cs}}>
+          <div style={{fontSize:13,fontWeight:700,marginBottom:4}}>{"🔄 PC ↔ iPhone データ同期"}</div>
+          <div style={{fontSize:10,color:C.tm,marginBottom:12,lineHeight:1.5}}>{"JSONファイルでデータを書き出し・読み込み。AirDropやiCloudで端末間を転送できます。"}</div>
+
+          <button onClick={exportJSON} style={{width:"100%",padding:"12px",border:"none",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:700,background:C.a3,color:"#fff",marginBottom:8}}>
+            {"📤 データを書き出し (.json)"}
+          </button>
+          <div style={{fontSize:10,color:C.tm,marginBottom:12,textAlign:"center"}}>{"ラン"+runs.length+"件 ・ シューズ"+shoes.length+"足 ・ HR設定を含む全データ"}</div>
+
+          <button onClick={function(){setShowJSON(!showJSON);setJsonPrev(null);setJsonErr("")}} style={{width:"100%",padding:"12px",border:"2px dashed "+C.a3+"44",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:700,background:showJSON?C.a3+"10":"#fafafa",color:C.a3}}>
+            {showJSON?"✕ 閉じる":"📥 データを読み込み (.json)"}
+          </button>
+
+          {showJSON&&<div style={{marginTop:10}}>
+            <label style={{display:"block",width:"100%",padding:"12px",border:"2px dashed #ddd",borderRadius:10,cursor:"pointer",textAlign:"center",fontSize:13,fontWeight:600,color:C.a3,background:"#f8fff8",marginBottom:8}}>
+              {"📂 .jsonファイルを選択"}
+              <input type="file" accept=".json" onChange={handleJSONImport} style={{display:"none"}}/>
+            </label>
+            {jsonErr&&<div style={{background:"#fff5f5",border:"1px solid #f5cccc",borderRadius:8,padding:10,fontSize:11,color:"#c00",marginBottom:8}}>{jsonErr}</div>}
+            {jsonPrev&&<div>
+              <div style={{background:"#f0f9f0",border:"1px solid #c0e0c0",borderRadius:8,padding:12,marginBottom:10}}>
+                <div style={{fontSize:12,fontWeight:700,color:C.a3,marginBottom:6}}>{"読み込みデータの内容"}</div>
+                <div style={{fontSize:11,color:C.td}}>{"ラン記録: "+jsonPrev.runs.length+"件"}</div>
+                <div style={{fontSize:11,color:C.td}}>{"シューズ: "+(jsonPrev.shoes?jsonPrev.shoes.length:0)+"足"}</div>
+                {jsonPrev.runs.length>0&&<div style={{fontSize:11,color:C.td}}>{"期間: "+jsonPrev.runs[0].date+" 〜 "+jsonPrev.runs[jsonPrev.runs.length-1].date}</div>}
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={function(){doJSONImport("merge")}} style={{flex:1,padding:"12px",border:"none",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:700,background:C.a3,color:"#fff"}}>
+                  {"🔀 マージ"}
+                </button>
+                <button onClick={function(){doJSONImport("replace")}} style={{flex:1,padding:"12px",border:"1.5px solid "+C.red,borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:700,background:C.rl,color:C.red}}>
+                  {"🔄 上書き"}
+                </button>
+              </div>
+              <div style={{fontSize:9,color:C.tm,marginTop:6,lineHeight:1.5}}>{"マージ: 既存データを残して新規分だけ追加。上書き: 全データを読み込んだファイルで置き換え。"}</div>
+            </div>}
+          </div>}
+        </div>
+
+        <button onClick={function(){var i={runs:dRn,shoes:dSh,profile:dPf};LS.del(SK);setData(i);LS.set(SK,i)}} style={{width:"100%",padding:"12px",border:"1.5px solid #ddd",borderRadius:10,cursor:"pointer",fontSize:12,background:"#fff",color:C.tm,marginTop:10}}>{"🔄 サンプルにリセット"}</button>
+      </div>}
+    </div>
+  </div>;
+}
+document.getElementById('boot').style.display='none';
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
